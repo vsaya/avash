@@ -1,0 +1,430 @@
+#!/bin/sh
+# __ __ ___ ___ ___ _____ _
+# \ \ /(_-</ _ `/ // / _ `/
+# /_\_\/___/\_,_/\_, /\_,_/
+#  󰦕   サ   ガ  /___/          
+
+# alt-icons:  ▫ ▩ ▰ ■   󰭯 ⯍
+set -e
+# debugging
+# keep track of the last executed command
+#trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
+# echo an error message before exiting
+#trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
+#
+#
+usage(){
+    echo "AVA : Aesthetic Vie Accumulator
+      Usage : 
+
+- ava :- outputs your unique ava id together with your current balance
+-i, --init|init :- creates your unique ava id and all the datafiles needed
+-s, --stage|stage <n> :- stage <n> number of sectors and generate blocks on them, omitting <n> creates 1 single block
+-m, --mine|mine :- start the mining cycle (sector blocks must be staged before mining can begin/continue)
+-b, --balance|balance :- ava looks up your current Vie balance
+-c, --scan|scan :- scans your sectors to reveal all blocks in the chain
+-v, --version :- show version
+-h, --help :- show this message" | awk -v OFS=' ' -v bld=$(tput bold) -v rst=$(tput sgr0) '$1 ~ /\-/ {$1 = "     "bld$1rst; $2 = bld$2rst;} NR==1 {$1 = "     "bld$1rst; $3 = bld$3rst;} 1' | column -t -s ":" -W 2 -E 1,2 -L -e
+
+}
+# progress bar: kndndrj/shload
+############################################################
+# Setup the progress bar                                   #
+# Usage:                                                   #
+#     shload_setup <maximum_value> <loading_symbol>        #
+############################################################
+shload_setup() {
+  # Progress bar variables
+  shload_percent=$1
+  shload_symbol="$2"
+
+  # Bar width depends on terminal size, max width is 96
+  # and the default delimiter is 1 percent
+  shload_width=96
+  shload_delimiter=$shload_percent
+  while [ $(($shload_width + 20)) -gt $(tput cols) ]; do
+    shload_width=$(($shload_width / 2))
+    shload_delimiter=$(($shload_delimiter * 2))
+  done
+
+  # If maximum count is less than bar width,
+  # adjust symbol width and delimiter (when will the bar update)
+  shload_count=$shload_width
+  while [ $1 -lt $shload_count ]; do
+    shload_delimiter=$(($shload_delimiter * 2))
+    shload_symbol="$shload_symbol$shload_symbol"
+    shload_count=$(($shload_count / 2))
+  done
+
+  # Empty bar and completion variable
+  shload_bar=""
+  shload_completion_old=0
+
+  # Print the skeleton and save cursor location
+  printf "\033[1;032m$3:\033[0m\033[s [\033[${shload_width}C] 0%%"
+  # Add 1 to the width (less math later)
+  shload_width=$(($shload_width + 1))
+}
+
+############################################################
+# Update the progress bar                                  #
+# Usage:                                                   #
+#     shload_update <current_value>                        #
+############################################################
+shload_update() {
+  shload_count=$(($1 * 100))
+  shload_completion=$(($shload_count / $shload_percent))
+
+  if [ $shload_completion -ne $shload_completion_old ]; then
+    if [ $shload_completion -lt 101 ]; then
+      # Make the bar itself, by printing the number of characters needed
+      shload_bar=$(printf "%0.s${shload_symbol}" $(seq -s " " 1 $(($shload_count / $shload_delimiter))))
+    else
+      shload_completion=100
+      shload_bar=$(printf "%0.s${shload_symbol}" $(seq -s " " 1 $(($((shload_percent * 100)) / shload_delimiter))))
+    fi
+    shload_completion_old=$shload_completion
+  fi
+
+  # Print progress bar and percentage
+  printf "\033[u [$shload_bar\033[u \033[${shload_width}C] $shload_completion%%"
+}
+avaLogo(){
+    echo "
+    ___ _    _____
+   /   | |  / /   |
+  / /| | | / / /| |  Aesthetic Vie Accumulator $version
+ / / | | |/ / / | |  xsaya/ava
+/_/  |_|___/_/  |_|  
+ 
+"
+}
+avaMiner(){
+    echo '
+ __ ___ ____ _
+/ _` \ V / _` | 
+\__,_|\_/\__,_| For the prospects of Vie....
+'
+}
+avaLookup(){
+    echo "
+ __ ___ ____ _
+/ _\` \ V / _\` | ava lookup
+\__,_|\_/\__,_| id: $1
+"
+}
+
+
+# simulate progress with a single line
+# (actions come after this command finishes)
+emptyProgress(){
+    progText="$2"
+    symbol="${3:-$loadSymbol}"
+    interval=${4:-.1}
+
+    index=0
+    maxCount=$1
+    shload_setup $maxCount $symbol "$progText"
+    while [ $index -lt $maxCount ]; do
+        sleep $interval
+        index=$(($index + 1))
+        shload_update $index
+    done
+    echo
+}
+
+avaInit(){
+    if [ -d "$dataDir" ]; then
+        avaLogo
+        echo "$dataDir already exists! delete it manually to initialize again."
+        echo "Exiting..."
+        exit
+    fi
+    clear
+    avaLogo
+    echo "Welcome to Ava!"
+    echo "Setting up environment..."
+    emptyProgress 30 "init"
+    mkdir "$dataDir"
+    echo
+    echo "Generating unique ava ID..."
+    emptyProgress 20 "ava-id"
+    uuidgen > "$avaid"
+    echo
+    echo "Initializing vie account and balance to 0.000000..."
+    emptyProgress 18 "account"
+    echo "0.000000" > "$viebal"
+    echo
+    echo "Generating block types..."
+    emptyProgress 40 "blocks"
+    echo "a aspiration
+    b bodacious
+    c constellation
+    d demure
+    v vigorous" > "$blockTypes"
+    echo
+    echo "Done."
+}
+
+generateBlocks(){
+    count=${1:-1}
+    [ $count -eq 0 ] && count=1
+    echo "Generating blocks on sectors..."
+    echo
+
+    bIndex=0
+    while [ $bIndex -lt $count ]; do
+
+        rand=$((1 + RANDOM % 100))
+        typeSpeed=.27
+        lineNr=1
+        if [ "$rand" -lt 6 ];then lineNr=5; typeSpeed=.68
+        elif [ "$rand" -lt 40 ];then lineNr=4; typeSpeed=.52
+        elif [ "$rand" -lt 60 ];then lineNr=3; typeSpeed=.41
+        elif [ "$rand" -lt 80 ];then lineNr=2; typeSpeed=.34
+        fi
+        echo "Allocating block..."
+        emptyProgress 40 ""
+        blockChar=$(sed -n -E "$lineNr p" $blockTypes | awk '{print $1}')
+        blockName=$(sed -n -E "$lineNr p" $blockTypes | awk '{print $2}')
+        echo "Block type identified:"
+        echo "                  :: $blockName"
+        echo "Beginning sector integration..."
+        sectorName="$(head /dev/urandom | tr -dc 0-9a-z | head -c 8)"
+        emptyProgress 100 "$blockChar :: $sectorName" "" $typeSpeed
+        emptyProgress 35 "Saving sector" "#" $typeSpeed
+        echo "$blockChar" >> "$sectors"
+        echo
+        echo
+        bIndex=$(($bIndex + 1))
+    done
+}
+
+startMining(){
+    clear
+    avaMiner
+    echo "Entering mining cycle..."
+    echo " -- >"
+    emptyProgress 42 "loading sectors"
+
+    sector="$(sed -n -E '1 p' $sectors)"
+    emptyProgress 32 "loading balance"
+    balance="$(cat $viebal)"
+    printf "Vie balance:  %.10f v\n" "$balance"
+    echo -n "Starting"
+    sleep 1
+    echo -n "."
+    sleep 1
+    echo -n "."
+    sleep 1
+    echo -n "."
+    sleep 1
+    echo
+
+    divisor=1000000000
+
+    while [ ! -z "$sector" ]; do
+
+        vieReward=0
+        rewardFactor=$(echo "120 / $divisor" | bc -l)
+        mineSpeed=1.2
+        chunkCount=0
+        case "$sector" in
+            a) 
+                chunkCount=$((1 + RANDOM % 2))
+                rewardFactor=$(echo "120 / $divisor" | bc -l)
+                mineSpeed='1'
+                ;;
+            b) 
+                chunkCount=$((1 + RANDOM % 3))
+                rewardFactor=$(echo "220 / $divisor" | bc -l)
+                mineSpeed='1.2'
+                ;;
+            c) 
+                chunkCount=$((1 + RANDOM % 4))
+                rewardFactor=$(echo "320 / $divisor" | bc -l)
+                mineSpeed='.8'
+                ;;
+            d) 
+                chunkCount=$((1 + RANDOM % 5))
+                rewardFactor=$(echo "420 / $divisor" | bc -l)
+                mineSpeed='1.4'
+                ;;
+            v) 
+                chunkCount=$((1 + RANDOM % 6))
+                rewardFactor=$(echo "924 / $divisor" | bc -l)
+                mineSpeed='2.2'
+                ;;
+            *) echo default
+                ;;
+        esac
+        rand=$((1 + RANDOM % 100))
+        if [[ $rand -lt 17 ]]; then
+            chunkCount=0
+            vieReward=0
+        fi
+
+
+        echo
+        echo
+        # load in long block ID, with visual effect (TODO)
+        blockId=$(head /dev/urandom | tr -dc 0-9a-z | head -c 32)
+        echo "ava-sid :: $blockId" 
+        emptyProgress 100 "󱧕 $sector :: ex " "▰" $mineSpeed
+        echo -n "chunks "
+        cIndex=0
+        chunkVie=0
+        chunkName=""
+        while [ $cIndex -lt $chunkCount ]; do
+            chunkName="$sector$(head /dev/urandom | tr -dc 0-9a-z | head -c 3)"
+            echo -n "  $chunkName "
+
+            randVie=$((23 + RANDOM % 38))
+            chunkVie=$(echo "$randVie / $divisor" | bc -l)
+            realVie=$(echo "$chunkVie + $rewardFactor" | bc -l)
+            printf " +%.10f" "$realVie"
+
+            vieReward=$(echo "$vieReward + $realVie" | bc -l)
+            cIndex=$(($cIndex + 1))
+        done
+        echo
+        printf "+%.10f" "$vieReward"
+        balance=$(echo "$balance + $vieReward" | bc -l)
+        echo "$balance" > "$viebal"
+
+        sed -i -E '1 d' "$sectors"
+        sector="$(sed -n -E '1 p' $sectors)"
+    done
+    echo
+    echo
+    echo "All sectors mined."
+    echo "Exiting..."
+}
+
+checkBalance(){
+    balid=$(cat $avaid)
+    emptyProgress 18 "ava lookup     "
+    emptyProgress 12 "loading balance"
+    bal=$(cat "$viebal")
+    avaLookup "$balid"
+    printf "        balance:  %.10f v" "$bal"
+    echo
+}
+
+checkSectors(){
+    balid=$(cat $avaid)
+    avaLookup "$balid"
+    emptyProgress 18 "ava lookup     "
+    echo -n "Preparing sectors"
+    sleep 1
+    echo -n "."
+    sleep 1
+    echo -n "."
+    sleep 1
+    echo -n "."
+    sleep 1
+    echo
+    count=$(cat $sectors | wc -l)
+    secIndex=0
+    result=""
+    while read -r line; do
+        result="$result$line"
+
+        emptyProgress 3 "$line :: "
+        secIndex=$(($secIndex + 1))
+    done < "$sectors"
+    echo
+    echo "sector chain: ($count/$count)"
+    echo "     :: $result"
+}
+
+avaSignature(){
+    balid=$(cat $avaid)
+    bal=$(cat "$viebal")
+    echo "$balid::$bal"
+}
+
+# vars
+version="v1.0"
+dataDir="$HOME/.local/share/ava"
+sectors="$dataDir/sectorFile"
+avaid="$dataDir/ava-uuid"
+viebal="$dataDir/vie-balance"
+blockTypes="$dataDir/block-types"
+# additional symbols: ⠉܈⠓܁·
+loadSymbol="˗"
+fixedArgs=()
+numargs=0
+numopts=0
+stage=0
+stageCount=0
+mine=0
+checkBal=0
+scan=0
+while [ $# -gt 0 ]; do
+    arg=$1
+    shift
+    # do something with arg
+    case $arg in
+        -i|--init|init)
+            avaInit
+            ;;
+        -s|--stage|stage)
+            stage=1
+            if [ -z $1 ]; then
+                echo "stageCount is: $1"
+            fi
+            if [ ! -z $1 ]; then
+                stageCount=$1
+                shift
+            fi
+            ;;
+        -m|--mine|mine)
+            mine=1
+            ;;
+        -b|--balance|balance)
+            checkBal=1
+            ;;
+        -c|--scan|scan)
+            scan=1
+            ;;
+        -v|--version)
+            avaLogo
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            fixedArgs+=($arg)
+            numargs=$((numargs + 1))
+    esac
+    numopts=$(($numopts + 1))
+done
+if [ ! -d "$dataDir" ]; then
+    avaLogo
+    echo "Cannot proceed without data directory, make sure to run ava init to setup your ava environment."
+    echo "Exiting..."
+    exit
+fi
+if [ $numopts -gt 0 ]; then
+    if [ $stage -eq 1 ]; then
+        generateBlocks "$stageCount"
+    fi
+    if [ $mine -eq 1 ]; then
+        echo "We're about to mine now"
+        startMining
+    fi
+    if [ $checkBal -eq 1 ]; then
+        checkBalance
+    fi
+    if [ $scan -eq 1 ]; then
+        checkSectors
+    fi
+else
+    avaSignature
+fi
+if [ $numargs -gt 0 ]; then
+    echo "Ava takes no arguments at this time."
+fi
+
+
